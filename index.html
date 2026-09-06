@@ -422,6 +422,8 @@ $('btnLogout2').addEventListener('click', doLogout);
 let capturing = false;
 let samples = []; // {t, ax,ay,az, alpha,beta,gamma}
 let latestOrient = {alpha:0,beta:0,gamma:0};
+let seedOrient = {alpha:0,beta:0,gamma:0}; // 스윙 시작 순간의 자세 (자이로 적분의 시작점)
+let orientationListenerAttached = false;
 let lastT = null;
 let autoStopTimer = null;
 
@@ -438,9 +440,13 @@ function motionHandler(e){
     ay = (e.accelerationIncludingGravity.y||0) - g.y;
     az = (e.accelerationIncludingGravity.z||0) - g.z;
   }
+  const rr = e.rotationRate || {};
   samples.push({
     t: now,
     ax, ay, az,
+    // devicemotion 이벤트 안의 rotationRate: 가속도와 완전히 같은 타임스탬프에서 나오는 값 (동기화 오차 없음)
+    rrAlpha: rr.alpha||0, rrBeta: rr.beta||0, rrGamma: rr.gamma||0,
+    // deviceorientation 기반 값은 fallback/디버그용으로만 같이 저장
     alpha: latestOrient.alpha, beta: latestOrient.beta, gamma: latestOrient.gamma
   });
 }
@@ -515,6 +521,10 @@ btnSwing.addEventListener('click', async ()=>{
   }
   $('permBanner').style.display='none';
   $('resultCard').style.display='none';
+  if(!orientationListenerAttached){
+    window.addEventListener('deviceorientation', orientHandler);
+    orientationListenerAttached = true;
+  }
   startCalibration();
 });
 
@@ -542,6 +552,7 @@ function beginSwingCapture(){
   samples = [];
   lastT = null;
   capturing = true;
+  seedOrient = {alpha: latestOrient.alpha, beta: latestOrient.beta, gamma: latestOrient.gamma};
   btnSwing.classList.add('recording');
   btnSwing.textContent = '●';
   btnSwing.disabled = true;
@@ -549,7 +560,6 @@ function beginSwingCapture(){
   $('stageStatus').textContent = '지금 스윙하세요!';
   $('stageHint').textContent = '자연스럽게 한 번 휘두른 뒤 "스윙 완료"를 누르세요.';
   window.addEventListener('devicemotion', motionHandler);
-  window.addEventListener('deviceorientation', orientHandler);
   autoStopTimer = setTimeout(()=>{ finishCapture(); }, 2500);
 }
 
@@ -558,7 +568,6 @@ function finishCapture(){
   capturing = false;
   clearTimeout(autoStopTimer);
   window.removeEventListener('devicemotion', motionHandler);
-  window.removeEventListener('deviceorientation', orientHandler);
   btnStop.style.display='none';
   resetStage();
   $('stageStatus').textContent = '분석 중…';
@@ -569,7 +578,7 @@ function finishCapture(){
       $('stageHint').textContent = '스윙 시간이 너무 짧았거나 센서 데이터를 받지 못했습니다.';
       return;
     }
-    const analysis = analyzeSwing(samples);
+    const analysis = analyzeSwing(samples, seedOrient);
     showResult(analysis);
     resetStage();
   }, 250);
@@ -610,20 +619,97 @@ function vlen(v){return Math.sqrt(v[0]*v[0]+v[1]*v[1]+v[2]*v[2]);}
 function vnorm(v){const l=vlen(v)||1e-9; return [v[0]/l,v[1]/l,v[2]/l];}
 function dot(a,b){return a[0]*b[0]+a[1]*b[1]+a[2]*b[2];}
 
-function analyzeSwing(raw){
-  // dt + world-frame linear accel + face normal per sample
+// 3점 이동평균으로 벡터 배열의 샘플 단위 잡음을 줄인다
+function smoothVectors(arr, window=3){
+  const half = Math.floor(window/2);
+  const n = arr.length;
+  const out = [];
+  for(let i=0;i<n;i++){
+    const lo = Math.max(0,i-half), hi = Math.min(n-1,i+half);
+    let sx=0,sy=0,sz=0, c=0;
+    for(let k=lo;k<=hi;k++){ sx+=arr[k][0]; sy+=arr[k][1]; sz+=arr[k][2]; c++; }
+    out.push([sx/c, sy/c, sz/c]);
+  }
+  return out;
+}
+
+// ---- 자이로(rotationRate) 기반 자세 적분에 필요한 3x3 행렬 유틸 ----
+function cross(a,b){
+  return [a[1]*b[2]-a[2]*b[1], a[2]*b[0]-a[0]*b[2], a[0]*b[1]-a[1]*b[0]];
+}
+function skew(v){
+  return [[0,-v[2],v[1]],[v[2],0,-v[0]],[-v[1],v[0],0]];
+}
+function matMul(A,B){
+  const R=[[0,0,0],[0,0,0],[0,0,0]];
+  for(let i=0;i<3;i++) for(let j=0;j<3;j++){
+    let s=0; for(let k=0;k<3;k++) s+=A[i][k]*B[k][j];
+    R[i][j]=s;
+  }
+  return R;
+}
+function matAdd(A,B){
+  return A.map((row,i)=>row.map((v,j)=>v+B[i][j]));
+}
+function scaleMat(A,s){
+  return A.map(row=>row.map(v=>v*s));
+}
+function getCol(M,j){ return [M[0][j],M[1][j],M[2][j]]; }
+function setCols(c1,c2,c3){
+  return [
+    [c1[0],c2[0],c3[0]],
+    [c1[1],c2[1],c3[1]],
+    [c1[2],c2[2],c3[2]]
+  ];
+}
+// 매 스텝 누적되는 부동소수점 오차를 없애기 위한 그람-슈미트 정규직교화
+function orthonormalize(M){
+  let c1 = vnorm(getCol(M,0));
+  let c2raw = getCol(M,1);
+  const d = dot(c2raw,c1);
+  let c2 = vnorm([c2raw[0]-d*c1[0], c2raw[1]-d*c1[1], c2raw[2]-d*c1[2]]);
+  let c3 = cross(c1,c2);
+  return setCols(c1,c2,c3);
+}
+
+function analyzeSwing(raw, seed){
+  // rotationRate(자이로 각속도)가 실제로 들어오는지 확인 - 없는 기기/브라우저 대비 fallback
+  const hasGyro = raw.some(s => Math.abs(s.rrAlpha)+Math.abs(s.rrBeta)+Math.abs(s.rrGamma) > 0.5);
+
   let world = [];
   let faceN = [];
   let prevT = raw[0].t;
-  for(let i=0;i<raw.length;i++){
-    const s = raw[i];
-    const dt = i===0 ? 0.01 : Math.max(0.001,(s.t-prevT)/1000);
-    prevT = s.t;
-    const R = rotationMatrix(s.alpha, s.beta, s.gamma);
-    const aWorld = matVec(R,[s.ax,s.ay,s.az]);
-    const n = matVec(R,[0,0,1]);
-    world.push({dt, a:aWorld});
-    faceN.push(n);
+
+  if(hasGyro){
+    // ---- 방식 A (기본): 가속도와 "같은 이벤트, 같은 타임스탬프"에서 나온 rotationRate를 적분해 자세를 추적 ----
+    // deviceorientation을 따로 안 쓰기 때문에 두 센서 이벤트 사이의 시간차(동기화 오차)가 생기지 않는다.
+    let R = rotationMatrix(seed.alpha, seed.beta, seed.gamma);
+    for(let i=0;i<raw.length;i++){
+      const s = raw[i];
+      const dt = i===0 ? 0.01 : Math.max(0.001,(s.t-prevT)/1000);
+      prevT = s.t;
+      const d2r = Math.PI/180;
+      // rotationRate.alpha=z축, beta=x축, gamma=y축 회전속도(deg/s)
+      const omegaBody = [s.rrBeta*d2r, s.rrGamma*d2r, s.rrAlpha*d2r];
+      const Rdot = matMul(R, skew(omegaBody));
+      R = orthonormalize(matAdd(R, scaleMat(Rdot, dt)));
+      const aWorld = matVec(R,[s.ax,s.ay,s.az]);
+      const n = matVec(R,[0,0,1]);
+      world.push({dt, a:aWorld});
+      faceN.push(n);
+    }
+  } else {
+    // ---- 방식 B (fallback): rotationRate 미지원 기기 - 기존처럼 deviceorientation 스냅샷 사용 ----
+    for(let i=0;i<raw.length;i++){
+      const s = raw[i];
+      const dt = i===0 ? 0.01 : Math.max(0.001,(s.t-prevT)/1000);
+      prevT = s.t;
+      const R = rotationMatrix(s.alpha, s.beta, s.gamma);
+      const aWorld = matVec(R,[s.ax,s.ay,s.az]);
+      const n = matVec(R,[0,0,1]);
+      world.push({dt, a:aWorld});
+      faceN.push(n);
+    }
   }
   // integrate velocity
   let vel = [[0,0,0]];

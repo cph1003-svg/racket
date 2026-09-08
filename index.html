@@ -9,22 +9,22 @@
 @import url('https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;600;700;800&family=Inter:wght@400;500;600;700&display=swap');
 
 :root{
-  --court:#123832;
-  --court-deep:#0a2622;
-  --line:#e9ecdf;
-  --ball:#cfe021;
-  --ball-deep:#a9b81a;
-  --clay:#d1603d;
-  --ink:#0d1f1c;
-  --muted:#9fb3ac;
-  --card:#153f38;
-  --card-line:rgba(233,236,223,0.12);
+  --court:#0f3f66;
+  --court-deep:#08243d;
+  --line:#eaf1f7;
+  --ball:#4fc3f7;
+  --ball-deep:#1f9fd8;
+  --clay:#e0663f;
+  --ink:#08202f;
+  --muted:#93b2c9;
+  --card:#12456e;
+  --card-line:rgba(234,241,247,0.12);
 }
 *{box-sizing:border-box;}
 html,body{margin:0;padding:0;}
 body{
   background:
-    radial-gradient(1200px 600px at 50% -10%, #1a4a41 0%, var(--court) 45%, var(--court-deep) 100%);
+    radial-gradient(1200px 600px at 50% -10%, #1c6ea3 0%, var(--court) 45%, var(--court-deep) 100%);
   color:var(--line);
   font-family:'Inter',sans-serif;
   min-height:100vh;
@@ -174,7 +174,7 @@ header.app{
 .stage-hint{font-size:13px;color:var(--muted);line-height:1.5;max-width:280px;}
 .swing-btn{
   width:150px;height:150px;border-radius:50%;
-  background:radial-gradient(circle at 35% 30%, #e2f04a, var(--ball) 60%, var(--ball-deep) 100%);
+  background:radial-gradient(circle at 35% 30%, #a8e4fb, var(--ball) 60%, var(--ball-deep) 100%);
   border:none;color:var(--ink);
   font-family:'Barlow Condensed',sans-serif;font-weight:800;font-size:22px;
   box-shadow:0 0 0 8px rgba(207,224,33,0.12);
@@ -809,7 +809,7 @@ function projectToPrincipalPlane(points){
 function gradeInfo(score){
   if(score>=90) return {label:'완벽', color:'var(--ball)', text:'출발 각도가 스윙 내내 거의 흔들리지 않았어요. 면이 매우 깨끗한 타원을 그렸습니다.'};
   if(score>=75) return {label:'우수', color:'var(--ball)', text:'전반적으로 안정적인 스윙이에요. 스윙 후반부의 손목 각도만 조금 더 고정해보세요.'};
-  if(score>=55) return {label:'양호', color:'#f0c94a', text:'궤적은 타원에 가깝지만 중간에 면 각도가 흔들렸어요. 팔꿈치를 축으로 더 크게 돌려보세요.'};
+  if(score>=55) return {label:'양호', color:'#7ecbe8', text:'궤적은 타원에 가깝지만 중간에 면 각도가 흔들렸어요. 팔꿈치를 축으로 더 크게 돌려보세요.'};
   if(score>=35) return {label:'연습 필요', color:'var(--clay)', text:'스윙 중 면이 방향과 자주 어긋났어요. 천천히, 일정한 각도를 유지하며 다시 시도해보세요.'};
   return {label:'다시 도전', color:'var(--clay)', text:'데이터가 불안정해요. 시작 전 잠깐 정지했다가 한 번에 부드럽게 휘둘러보세요.'};
 }
@@ -857,7 +857,7 @@ function drawPath(points){
     cssH/2 + (p.y-(minY+spanY/2))*scale
   ];
 
-  ctx.strokeStyle = 'rgba(233,236,223,0.08)';
+  ctx.strokeStyle = 'rgba(234,241,247,0.08)';
   ctx.lineWidth=1;
   for(let gx=0;gx<=cssW;gx+=cssW/6){ctx.beginPath();ctx.moveTo(gx,0);ctx.lineTo(gx,cssH);ctx.stroke();}
   for(let gy=0;gy<=cssH;gy+=cssH/5){ctx.beginPath();ctx.moveTo(0,gy);ctx.lineTo(cssW,gy);ctx.stroke();}
@@ -867,16 +867,16 @@ function drawPath(points){
     const [px,py]=toPx(p);
     if(i===0) ctx.moveTo(px,py); else ctx.lineTo(px,py);
   });
-  ctx.strokeStyle = getComputedStyle(document.documentElement).getPropertyValue('--ball').trim() || '#cfe021';
+  ctx.strokeStyle = getComputedStyle(document.documentElement).getPropertyValue('--ball').trim() || '#4fc3f7';
   ctx.lineWidth=2.5;
   ctx.lineJoin='round';
   ctx.stroke();
 
   const [sx,sy] = toPx(points[0]);
-  ctx.fillStyle = '#cfe021';
+  ctx.fillStyle = '#4fc3f7';
   ctx.beginPath(); ctx.arc(sx,sy,5,0,Math.PI*2); ctx.fill();
   const [ex,ey] = toPx(points[points.length-1]);
-  ctx.fillStyle = '#d1603d';
+  ctx.fillStyle = '#e0663f';
   ctx.beginPath(); ctx.arc(ex,ey,5,0,Math.PI*2); ctx.fill();
 }
 
@@ -934,11 +934,11 @@ async function renderHistory(){
       datasets:[{
         label:'점수',
         data,
-        borderColor:'#cfe021',
+        borderColor:'#4fc3f7',
         backgroundColor:'rgba(207,224,33,0.15)',
         tension:0.35,
         fill:true,
-        pointBackgroundColor:'#cfe021',
+        pointBackgroundColor:'#4fc3f7',
         pointRadius:3
       }]
     },
@@ -946,8 +946,8 @@ async function renderHistory(){
       responsive:true,
       plugins:{legend:{display:false}},
       scales:{
-        y:{min:0,max:100,ticks:{color:'#9fb3ac'},grid:{color:'rgba(233,236,223,0.08)'}},
-        x:{ticks:{color:'#9fb3ac'},grid:{display:false}}
+        y:{min:0,max:100,ticks:{color:'#93b2c9'},grid:{color:'rgba(234,241,247,0.08)'}},
+        x:{ticks:{color:'#93b2c9'},grid:{display:false}}
       }
     }
   });
